@@ -37,6 +37,7 @@ from ._geometry import (
     PlasmaVesselDistance,
     PrincipalCurvature,
     Volume,
+    LGradB,
 )
 from ._neoclassical import EffectiveRipple
 from ._omnigenity import (
