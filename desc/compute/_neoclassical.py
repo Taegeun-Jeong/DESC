@@ -148,6 +148,121 @@ def _dI_2(data, B, pitch):
     return jnp.sqrt(jnp.abs(1 - pitch * B)) / B
 
 
+def _dA_krook(data, B, pitch):
+    """Krook numerator integrand with |∂ψ/∂ρ| removed."""
+    return (
+        (2 - pitch * B)
+        * data["|grad(rho)|*kappa_g"]
+        / (B * jnp.sqrt(jnp.abs(1 - pitch * B)))
+    )
+
+
+def _dt_b_krook(data, B, pitch):
+    """Krook bounce-time integrand with B0 factored out."""
+    return jnp.reciprocal(jnp.sqrt(jnp.abs(1 - pitch * B)))
+
+
+@register_compute_fun(
+    name="effective ripple krook",
+    label="\\epsilon_{\\mathrm{eff},K}^{3/2}",
+    units="~",
+    units_long="None",
+    description="Krook-model effective ripple proxy for neoclassical transport",
+    dim=1,
+    params=[],
+    transforms={"grid": []},
+    profiles=[],
+    coordinates="r",
+    data=[
+        "min_tz |B|",
+        "max_tz |B|",
+        "kappa_g",
+        "|grad(rho)|",
+        "<|grad(rho)|>",
+        "V_psi",
+    ]
+    + Bounce2D.required_names,
+    resolution_requirement="tz",
+    grid_requirement={"can_fft2": True},
+    **_bounce_doc,
+)
+@partial(jit, static_argnames=_bounce_static_argnames)
+def _effective_ripple_krook(params, transforms, profiles, data, **kwargs):
+    """Compute the Krook-model effective ripple proxy."""
+    grid = transforms["grid"]
+
+    (
+        angle,
+        Y_B,
+        alpha,
+        num_transit,
+        num_well,
+        num_pitch,
+        pitch_batch_size,
+        surf_batch_size,
+        nufft_eps,
+        spline,
+        quad,
+        vander,
+    ) = Bounce2D._defaults(1, grid, **kwargs)
+
+    def eps_krook(data):
+        """Compute bounce-well contribution to the Krook proxy."""
+        bounce = Bounce2D(
+            grid,
+            data,
+            data["angle"],
+            Y_B,
+            alpha,
+            num_transit,
+            quad,
+            nufft_eps=nufft_eps,
+            is_fourier=True,
+            spline=spline,
+            vander=vander,
+        )
+
+        def fun(pitch_inv):
+            A_krook, t_b_krook = bounce.integrate(
+                [_dA_krook, _dt_b_krook],
+                pitch_inv,
+                data,
+                ["|grad(rho)|*kappa_g"],
+                num_well=num_well,
+                nufft_eps=nufft_eps,
+                is_fourier=True,
+            )
+
+            return safediv(A_krook**2, t_b_krook).sum(-1).mean(-2)
+
+        return jnp.sum(
+            batch_map(fun, data["pitch_inv"], pitch_batch_size)
+            * data["pitch_inv weight"]
+            / data["pitch_inv"] ** 4,
+            axis=-1,
+        )
+
+    B0 = data["max_tz |B|"]
+    scalar = 9 * jnp.pi**2 / (num_transit * 4 * 2**0.5)
+
+    data["effective ripple krook"] = scalar * (
+        (B0**2 / data["<|grad(rho)|>"]) ** 2
+        * Bounce2D.batch(
+            eps_krook,
+            {"|grad(rho)|*kappa_g": data["|grad(rho)|"] * data["kappa_g"]},
+            data,
+            angle,
+            grid,
+            num_pitch,
+            surf_batch_size,
+            expand_out=True,
+        )
+        / data["V_psi"]
+    )
+
+    return data
+
+
 @register_compute_fun(
     name="effective ripple 3/2",
     label=(
