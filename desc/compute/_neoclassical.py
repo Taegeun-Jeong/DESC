@@ -177,6 +177,7 @@ def _dt_b_krook(data, B, pitch):
         "min_tz |B|",
         "max_tz |B|",
         "kappa_g",
+        "R0",
         "|grad(rho)|",
         "<|grad(rho)|>",
         "V_psi",
@@ -238,7 +239,7 @@ def _effective_ripple_krook(params, transforms, profiles, data, **kwargs):
         return jnp.sum(
             batch_map(fun, data["pitch_inv"], pitch_batch_size)
             * data["pitch_inv weight"]
-            / data["pitch_inv"] ** 4,
+            / data["pitch_inv"] ** 2,
             axis=-1,
         )
 
@@ -246,7 +247,7 @@ def _effective_ripple_krook(params, transforms, profiles, data, **kwargs):
     scalar = 9 * jnp.pi**2 / (num_transit * 4 * 2**0.5)
 
     data["effective ripple krook"] = scalar * (
-        (B0**2 / data["<|grad(rho)|>"]) ** 2
+        (data["R0"] * B0 / data["<|grad(rho)|>"]) ** 2
         * Bounce2D.batch(
             eps_krook,
             {"|grad(rho)|*kappa_g": data["|grad(rho)|"] * data["kappa_g"]},
